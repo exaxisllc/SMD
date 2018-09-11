@@ -25,12 +25,19 @@ trait DaoData[T] {
    * defines the mapping of scala attributes to datastore attributes, same named attributes do not need to be mapped
    */
   val attributeMap:Map[String,String]
+
   /**
    * defines the attributes that will be matched against a query in the search.
    */
   val filterSet:Set[String]
 
-  def dataSourceName(attrName:String) = attributeMap.getOrElse(attrName, attrName)
+  /**
+    * Retrieves the datasource name for the attribute specified
+    *
+    * @param attrName
+    * @return
+    */
+  def dsName(attrName:String) = attributeMap.getOrElse(attrName, attrName)
 }
 
 

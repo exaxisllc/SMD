@@ -19,6 +19,7 @@ package org.exaxis.smd
 import reactivemongo.bson._
 
 import scala.util.{Success, Failure}
+import com.typesafe.scalalogging.Logger
 
 /* Implicits */
 
@@ -30,6 +31,7 @@ import scala.util.{Success, Failure}
  * @author      Pedro De Almeida (almeidap)
  */
 object DBQueryBuilder {
+	val logger = Logger("DBQueryBuilder")
 
 	/**
 	 * Convert a BSONObjectID to a BSONDocument containing the _id field name and the BSONObjectID.
@@ -50,7 +52,8 @@ object DBQueryBuilder {
      case None => BSONDocument("_id" -> BSONUndefined)
      case Some(s) => BSONObjectID.parse(s) match {
 		 	case Success(success) => id(success)
-			case Failure(failure) => BSONDocument("_id" -> BSONUndefined)
+			case Failure(failure) => logger.warn("BSONObjectID could not be parsed!! Defaulting to BSONUndefined!!")
+				BSONDocument("_id" -> BSONUndefined)
 		 }
    }
 

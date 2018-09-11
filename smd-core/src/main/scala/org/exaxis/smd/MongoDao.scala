@@ -18,13 +18,13 @@ package org.exaxis.smd
 
 import org.joda.time.DateTime
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.runtime.universe._
 import scala.util.{Failure, Success, Try}
 import com.typesafe.scalalogging.Logger
-import reactivemongo.api.{Cursor, DefaultDB, QueryOpts, ReadPreference}
+import reactivemongo.api.{Cursor, DefaultDB, QueryOpts}
 import reactivemongo.api.collections.bson.BSONCollection
-import reactivemongo.api.commands.{MultiBulkWriteResult, WriteError, WriteResult}
+import reactivemongo.api.commands._
 import reactivemongo.bson.{BSONBoolean, BSONDateTime, BSONDouble, BSONInteger, BSONLong, BSONRegex, _}
 import reactivemongo.api.commands.bson.BSONCountCommandImplicits._
 import reactivemongo.api.commands.bson.BSONCountCommand.Count
@@ -66,10 +66,7 @@ trait MongoDao[T] {
    */
   def insert(docList: List[T], ordered:Boolean=false)(implicit writer: BSONDocumentWriter[T]): Future[Try[Int]] = {
     logger.debug(s"Inserting document: [collection=$collectionName, data=$docList]")
-    multiTryIt(collection.flatMap{coll =>
-      val bulkDocs = docList.map(implicitly[coll.ImplicitlyDocumentProducer](_))
-      coll.bulkInsert(ordered=true)(bulkDocs: _*)
-    })
+    multiTryIt(collection.flatMap{_.insert[T](ordered=true).many(docList)})
   }
 
 
@@ -80,9 +77,9 @@ trait MongoDao[T] {
    * @param writer - The BSONDocumentWriter on the companion object for T
    * @return - a Future Try[Int]
    */
-  def insert(document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[Int]] = {
+  def insert(document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Inserting document: [collection=$collectionName, data=$document]")
-    tryIt(collection.flatMap(_.insert(document)))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(BSONObjectID.generate), document, upsert=true)))
   }
 
   /**
@@ -337,8 +334,14 @@ trait MongoDao[T] {
               famr.result[T] match {
                 case Some(t) => Success(t)
                 case None => famr.lastError match {
-                  case Some(le) => Failure(new Exception(le.err.getOrElse("")))
-                  case None => Failure(new Exception("Could not find document"))
+                    // TODO: Need a MongoDaoException or a more scala way of doing this like maybe just the error msg
+                    // TODO: I18n for error message?
+                  case Some(le) => val msg = le.err.getOrElse("")
+                    logger.error(msg)
+                    Failure(new Exception(msg))
+                  case None => val msg = "Could not find document"
+                    logger.error(msg)
+                    Failure(new Exception(msg))
                 }
               }
             })
@@ -361,7 +364,7 @@ trait MongoDao[T] {
     logger.debug(s"Finding documents with paging: [collection=$collectionName, query=$queryString] sort=$sortString")
     for {
       docs <- collection.flatMap(_.find(query).sort(sort).options(QueryOpts((page-1)*ipp, ipp)).cursor[T]().collect[List](ipp,Cursor.FailOnError[List[T]]()))
-      totalDocs <- collection.flatMap(_.runCommand(Count(query), ReadPreference.Nearest(None)))
+      totalDocs <- collection.flatMap(_.runCommand(Count(query)))
     } yield (docs, (totalDocs.count/ipp)+1)
   }
 
@@ -392,7 +395,7 @@ trait MongoDao[T] {
    * @return - Future[Source[T, Future[State] ]
    */
   def source(query: BSONDocument = BSONDocument.empty, sort: BSONDocument = BSONDocument.empty)(implicit reader: BSONDocumentReader[T], materializer: Materializer) = {
-    import reactivemongo.akkastream.{ State, cursorProducer }
+    import reactivemongo.akkastream.cursorProducer
     val queryString = BSONDocument.pretty(query)
     val sortString = BSONDocument.pretty(sort)
     logger.debug(s"Sourcing documents: [collection=$collectionName, query=$queryString] sort=$sortString")
@@ -434,9 +437,9 @@ trait MongoDao[T] {
    * @param writer - The BSONDocumentWriter on the companion object for T
    * @return - Future Try[Int]
    */
-  def update(id: Option[String], document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[Int]] = {
+  def update(id: Option[String], document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Updating document: [collection=$collectionName, id=$id, document=$document]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), document)))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), document)))
   }
 
   /**
@@ -447,8 +450,8 @@ trait MongoDao[T] {
    * @param multiple - should multiple records be updated
    * @return - Future Try[Int]
    */
-  def update(selector:BSONDocument, modifier:BSONDocument, multiple:Boolean = false): Future[Try[Int]] = {
-    tryIt(collection.flatMap(_.update(selector, modifier, multi=multiple)))
+  def update(selector:BSONDocument, modifier:BSONDocument, multiple:Boolean = false): Future[Try[UpdateWriteResult]] = {
+    updateTryIt(collection.flatMap(_.update(selector, modifier, multi=multiple)))
   }
 
   /**
@@ -459,9 +462,9 @@ trait MongoDao[T] {
    * @param writer - The BSONDocumentWriter on the companion object for T
    * @return - Future Try[Int]
    */
-  def update(id: BSONObjectID, document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[Int]] = {
+  def update(id: BSONObjectID, document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Updating document: [collection=$collectionName, id=$id, document=$document]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), document)))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), document)))
   }
 
   /**
@@ -470,9 +473,9 @@ trait MongoDao[T] {
    * @param query
    * @return - Future Try[Int]
    */
-  def update(id: Option[String], query: BSONDocument): Future[Try[Int]] = {
+  def update(id: Option[String], query: BSONDocument): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Updating by query: [collection=$collectionName, id=$id, query=$query]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), query)))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), query)))
   }
 
   /**
@@ -485,9 +488,9 @@ trait MongoDao[T] {
    * @tparam S
    * @return - Future Try[Int]
    */
-  def push[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[Int]] = {
+  def push[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Pushing to document: [collection=$collectionName, id=$id, field=$field data=$data]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.push(field, data))))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.push(field, data))))
   }
 
   /**
@@ -500,9 +503,9 @@ trait MongoDao[T] {
    * @tparam S
    * @return - Future Try[Int]
    */
-  def pull[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[Int]] = {
+  def pull[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Pulling from document: [collection=$collectionName, id=$id, field=$field query=$data]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.pull(field, data))))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.pull(field, data))))
   }
 
   /**
@@ -512,9 +515,9 @@ trait MongoDao[T] {
    * @param field - the field to be unset
    * @return
    */
-  def unset(id: Option[String], field: String): Future[Try[Int]] = {
+  def unset(id: Option[String], field: String): Future[Try[UpdateWriteResult]] = {
     logger.debug(s"Unsetting from document: [collection=$collectionName, id=$id, field=$field]")
-    tryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.unset(field))))
+    updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(id), DBQueryBuilder.unset(field))))
   }
 
   /**
@@ -530,7 +533,9 @@ trait MongoDao[T] {
     val queryDoc = buildQueryDocument(filter, params, daoData)
     if (queryDoc.isEmpty)
       Future {
-        Failure(new IllegalArgumentException("Arguments must be provided for a delete operation"))
+        val msg = "Arguments must be provided for a delete operation"
+        logger.error(msg)
+        Failure(new IllegalArgumentException(msg))
       }
     else
       remove(queryDoc)
@@ -586,7 +591,9 @@ trait MongoDao[T] {
     writeResult =>
       writeResult.writeErrors.isEmpty match {
         case true => Success(writeResult.n)
-        case false => Failure(new Exception(writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}))
+        case false => val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
+          logger.error(msg)
+          Failure(new Exception(msg))
       }
   } recover {
     case throwable => Failure(throwable)
@@ -602,8 +609,29 @@ trait MongoDao[T] {
   def multiTryIt(operation: Future[MultiBulkWriteResult]): Future[Try[Int]] = operation.map {
     writeResult =>
       writeResult.errmsg match {
-        case Some(msg) => Failure(new Exception(msg))
+        case Some(msg) => logger.error(msg)
+          Failure(new Exception(msg))
         case None => Success(writeResult.totalN)
+      }
+  } recover {
+    case throwable => Failure(throwable)
+  }
+
+  /**
+    * Execute a function that returns a Future[WriteResult] and return a Future[Try[Int]]. The Int that is returned
+    * is the number of documents, records, etc that were effected by the operation.
+    *
+    * @param operation - a function that returns a Future[WriteResult]
+    * @return - a Future Try[Int].
+    */
+  // TODO: Need to replace WriteResult with something that is not Mongo specific
+  def updateTryIt(operation: Future[UpdateWriteResult]): Future[Try[UpdateWriteResult]] = operation.map {
+    writeResult =>
+      writeResult.writeErrors.isEmpty match {
+        case true => Success(writeResult)
+        case false => val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
+          logger.error(msg)
+          Failure(new Exception(msg))
       }
   } recover {
     case throwable => Failure(throwable)

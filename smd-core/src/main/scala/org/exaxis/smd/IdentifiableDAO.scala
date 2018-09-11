@@ -16,6 +16,7 @@
 
 package org.exaxis.smd
 
+import reactivemongo.api.commands.{UpdateWriteResult, Upserted}
 import reactivemongo.bson._
 
 import scala.concurrent.Future
@@ -37,7 +38,7 @@ trait IdentifiableDAO[T <: Identifiable] extends MongoDao[T] {
    * @param writer - The BSONDocumentWriter on the companion object for T
    * @return - Future[Try[Int] ]
    */
-  def update(document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[Int]] = super.update(document.id, document)
+  def update(document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[UpdateWriteResult]] = super.update(document.id, document)
 
   /**
    * Update a list of T documents in a mongo collection
@@ -46,7 +47,7 @@ trait IdentifiableDAO[T <: Identifiable] extends MongoDao[T] {
    * @param writer - The BSONDocumentWriter on the companion object for T
    * @return - Future[Try[Int] ]
    */
-  def update(documents: List[T])(implicit writer: BSONDocumentWriter[T]): Future[List[Try[Int]]] = Future.sequence(documents.map{ document => super.update(document.id, document) })
+  def update(documents: List[T])(implicit writer: BSONDocumentWriter[T]): Future[List[Try[UpdateWriteResult]]] = Future.sequence(documents.map{ document => super.update(document.id, document) })
 
   /**
    * Remove a T document in a mongo collection
