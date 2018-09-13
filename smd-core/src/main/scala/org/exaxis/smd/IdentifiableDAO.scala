@@ -20,7 +20,7 @@ import reactivemongo.api.commands.UpdateWriteResult
 import reactivemongo.bson._
 
 import scala.concurrent.Future
-import scala.util.Try
+import scala.util.{Failure, Try}
 
 /**
  * IdentifiableDAO is a trait that adds methods to MongoDAO that work with Identifiable.
@@ -30,6 +30,20 @@ import scala.util.Try
  * @author dberry
  */
 trait IdentifiableDAO[T <: Identifiable] extends MongoDao[T] {
+
+  /**
+    * Insert a T document into a mongo collection
+    *
+    * @param document - a T
+    * @param writer - The BSONDocumentWriter on the companion object for T
+    * @return - a Future Try[Int]
+    */
+  override def insert(document: T)(implicit writer: BSONDocumentWriter[T]): Future[Try[UpdateWriteResult]] = {
+    if (document.id == None)
+      updateTryIt(collection.flatMap(_.update(DBQueryBuilder.id(BSONObjectID.generate), document, upsert=true)))
+    else
+      Future(Failure(new Exception("id must be None on insert")))
+  }
 
   /**
    * Update a T document in a mongo collection
@@ -71,7 +85,7 @@ trait IdentifiableDAO[T <: Identifiable] extends MongoDao[T] {
    *
    * @param document - a T
    * @param reader - The BSONDocumentReader on the companion object for T
-   * @return - Future[Try[Int] ]
+   * @return - Future Option[T]
    */
   def findById(document: T)(implicit reader: BSONDocumentReader[T]): Future[Option[T]] = super.findById(document.id)
 

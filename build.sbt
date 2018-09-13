@@ -24,6 +24,12 @@ lazy val commonSettings = Seq(
 
   credentials += Credentials(Path.userHome / ".sbt" / ".credentials"),
   publishMavenStyle := true,
+  libraryDependencies ++= Seq(
+    "com.typesafe.play" % "play-json-joda_2.12" % "2.6.0" % Test
+    , "org.scaldi" %% "scaldi" % "0.5.8" % Test
+    , "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "2.1.1" % Test  // force a newer version
+    , "com.github.simplyscala" %% "scalatest-embedmongo" % "0.2.4" %  Test
+    , "org.scalatest" %% "scalatest" % "3.0.5" % Test),
   packagedArtifacts in publish ~= { m =>
     val classifiersToExclude = Set(
       Artifact.SourceClassifier,
@@ -34,6 +40,11 @@ lazy val commonSettings = Seq(
     }
   }
 )
+
+lazy val root = (project in file("."))
+  .aggregate(smdcore, smdplay)
+  .settings( name := "smd"
+    , publishTo := None )
 
 lazy val smdcore = (project in file("smd-core"))
   .settings(commonSettings
@@ -53,8 +64,7 @@ lazy val smdplay = (project in file("smd-play"))
   .settings(commonSettings
     , name := "smd-play"
     , libraryDependencies ++= Seq(
-      "org.reactivemongo" %% "reactivemongo" % "0.15.1"
-      , "org.reactivemongo" %% "play2-reactivemongo" % "0.15.1-play26"
+      "org.reactivemongo" %% "play2-reactivemongo" % "0.15.1-play26"
       , "org.reactivemongo" %% "reactivemongo-play-json" % "0.15.1-play26"
       , "com.typesafe.play" %% "play" % "2.6.18" % "provided"
       , "com.typesafe.play" %% "play-ws" % "2.6.18"  % "provided"
