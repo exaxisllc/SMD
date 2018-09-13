@@ -29,12 +29,15 @@ import reactivemongo.bson.{BSONBoolean, BSONDateTime, BSONDouble, BSONInteger, B
 import reactivemongo.api.commands.bson.BSONCountCommandImplicits._
 import reactivemongo.api.commands.bson.BSONCountCommand.Count
 import akka.stream.Materializer
+import play.api.libs.iteratee.Enumerator
 
 
 /**
  * MongoDAO[T] is a wrapper around the reactiveMongo libraries to consolidate all the common code that each individual class
  * would need for CRUD functions. This class works at a higher level. It works by having the class to be marshalled in and
  * out of mongo as the type parameter T.
+ *
+ * @tparam T - This is the case class that is being marshalled in and out of mongo
  *
  * Created by dberry on 13/3/14.
  */
@@ -46,7 +49,7 @@ trait MongoDao[T] {
    */
   val collectionName: String
 
-  implicit val defaultDBFuture : Future[DefaultDB];
+  implicit val defaultDBFuture : Future[DefaultDB]
   implicit val executionContext : ExecutionContext
 
   /**
@@ -55,7 +58,7 @@ trait MongoDao[T] {
    * @return - BSONCollection
    */
 //  lazy val collection = reactiveMongoApi.db.collection[BSONCollection](collectionName)
-  def collection = defaultDBFuture.map(_.collection[BSONCollection](collectionName))
+  def collection : Future[BSONCollection] = defaultDBFuture.map(_.collection[BSONCollection](collectionName))
 
   /**
    * Inserts a list of T into mongo
@@ -156,7 +159,7 @@ trait MongoDao[T] {
    */
   private def buildSortDocument(orderby: Option[String], attributeMap:Map[String,String]) = orderby match {
     case None => logger.debug("orderby = None"); BSONDocument.empty
-    case Some(sorts) => logger.debug("orderby = "+sorts);
+    case Some(sorts) => logger.debug("orderby = "+sorts)
       sorts.split(",").foldLeft(BSONDocument.empty) {
         (doc, s) =>
           s.split(" ").toList match {
@@ -204,7 +207,7 @@ trait MongoDao[T] {
    */
   private def buildAttributeDocument(params: Map[String, String], attributeMap:Map[String,String] )(implicit tag : TypeTag[T] ) = {
     params.keys.foldLeft(BSONDocument.empty) {
-      (doc,key) => doc ++ processAttribute(key, params.get(key).get, attributeMap.getOrElse(key, key))
+      (doc,key) => doc ++ processAttribute(key, params(key), attributeMap.getOrElse(key, key))
     }
   }
 
@@ -229,7 +232,7 @@ trait MongoDao[T] {
     sval.charAt(0) match {
       case '(' => processRange(name, sval.substring(1,sval.length-1), dbName) // process the range
       case '[' => processIn(name, sval.substring(1,sval.length-1), dbName)    // process the in
-      case s => dbName -> convertAttributeToBson(name, sval)
+      case _ => dbName -> convertAttributeToBson(name, sval)
     }
   }
 
@@ -279,7 +282,7 @@ trait MongoDao[T] {
    * @return - BSONDocument
    */
   private def processIn(name:String, sval:String,  dbName:String)(implicit tag : TypeTag[T] ) : (String, BSONValue) = {
-    dbName -> BSONDocument( "$in" -> (sval.split(",").map{ inVal => convertAttributeToBson(name, inVal) }))
+    dbName -> BSONDocument( "$in" -> sval.split(",").map{ inVal => convertAttributeToBson(name, inVal) })
   }
 
   /**
@@ -330,7 +333,7 @@ trait MongoDao[T] {
     val sortString = BSONDocument.pretty(sort)
     logger.debug(s"Finding and modifying documents: [collection=$collectionName, query=$queryString] sort=$sortString")
     for {
-      doc <- collection.flatMap(_.findAndUpdate(selector, document, true, true, Some(sort)).map { famr =>
+      doc <- collection.flatMap(_.findAndUpdate(selector, document, fetchNewObject = true, upsert = true, Some(sort)).map { famr =>
               famr.result[T] match {
                 case Some(t) => Success(t)
                 case None => famr.lastError match {
@@ -377,7 +380,7 @@ trait MongoDao[T] {
    * @param reader - The BSONDocumentReader on the companion object for T
    * @return -  Future[Enumerator[T] ]
    */
-  def enumerate(query: BSONDocument = BSONDocument.empty, sort: BSONDocument = BSONDocument.empty)(implicit reader: BSONDocumentReader[T]) = {
+  def enumerate(query: BSONDocument = BSONDocument.empty, sort: BSONDocument = BSONDocument.empty)(implicit reader: BSONDocumentReader[T]) : Future[Enumerator[T]] = {
     import reactivemongo.play.iteratees.cursorProducer
     val queryString = BSONDocument.pretty(query)
     val sortString = BSONDocument.pretty(sort)
@@ -469,8 +472,8 @@ trait MongoDao[T] {
 
   /**
    *
-   * @param id
-   * @param query
+   * @param id - The BSONObjectID of the document
+   * @param query - BSONDocument containing the query information
    * @return - Future Try[Int]
    */
   def update(id: Option[String], query: BSONDocument): Future[Try[UpdateWriteResult]] = {
@@ -485,7 +488,7 @@ trait MongoDao[T] {
    * @param field - field in the document
    * @param data - field data
    * @param writer - The BSONDocumentWriter on the companion object for T
-   * @tparam S
+   *
    * @return - Future Try[Int]
    */
   def push[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[UpdateWriteResult]] = {
@@ -500,7 +503,7 @@ trait MongoDao[T] {
    * @param field - field in the document to pull
    * @param data - field data
    * @param writer - The BSONDocumentWriter on the companion object for T
-   * @tparam S
+   *
    * @return - Future Try[Int]
    */
   def pull[S](id: Option[String], field: String, data: S)(implicit writer: BSONDocumentWriter[S]): Future[Try[UpdateWriteResult]] = {
@@ -580,7 +583,7 @@ trait MongoDao[T] {
   def removeAll(): Future[Try[Int]] = remove(BSONDocument())
 
   /**
-   * Execute a function that returns a Future[WriteResult] and return a Future[Try[Int]]. The Int that is returned
+   * Execute a function that returns a Future[WriteResult] and return a Future[ Try[Int] ]. The Int that is returned
    * is the number of documents, records, etc that were effected by the operation.
    *
    * @param operation - a function that returns a Future[WriteResult]
@@ -588,19 +591,19 @@ trait MongoDao[T] {
    */
   // TODO: Need to replace WriteResult with something that is not Mongo specific
   def tryIt(operation: Future[WriteResult]): Future[Try[Int]] = operation.map {
-    writeResult =>
-      writeResult.writeErrors.isEmpty match {
-        case true => Success(writeResult.n)
-        case false => val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
-          logger.error(msg)
-          Failure(new Exception(msg))
+    writeResult => if (writeResult.writeErrors.isEmpty) {
+        Success(writeResult.n)
+      } else {
+        val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
+        logger.error(msg)
+        Failure(new Exception(msg))
       }
   } recover {
     case throwable => Failure(throwable)
   }
 
   /**
-   * Execute a function that returns a Future[MultiBulkWriteResult] and return a Future[Try[Int]]. The Int that is returned
+   * Execute a function that returns a Future[MultiBulkWriteResult] and return a Future[ Try[Int] ]. The Int that is returned
    * is the number of documents, records, etc that were effected by the operation.
    *
    * @param operation - a function that returns a Future[MultiBulkWriteResult]
@@ -618,7 +621,7 @@ trait MongoDao[T] {
   }
 
   /**
-    * Execute a function that returns a Future[WriteResult] and return a Future[Try[Int]]. The Int that is returned
+    * Execute a function that returns a Future[WriteResult] and return a Future[ Try[Int] ]. The Int that is returned
     * is the number of documents, records, etc that were effected by the operation.
     *
     * @param operation - a function that returns a Future[WriteResult]
@@ -626,13 +629,13 @@ trait MongoDao[T] {
     */
   // TODO: Need to replace WriteResult with something that is not Mongo specific
   def updateTryIt(operation: Future[UpdateWriteResult]): Future[Try[UpdateWriteResult]] = operation.map {
-    writeResult =>
-      writeResult.writeErrors.isEmpty match {
-        case true => Success(writeResult)
-        case false => val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
-          logger.error(msg)
-          Failure(new Exception(msg))
-      }
+    writeResult => if (writeResult.writeErrors.isEmpty) {
+      Success(writeResult)
+    } else {
+      val msg = writeResult.writeErrors.foldLeft(""){(s:String,w:WriteError)=> s+";"+w.errmsg}
+      logger.error(msg)
+      Failure(new Exception(msg))
+    }
   } recover {
     case throwable => Failure(throwable)
   }

@@ -45,14 +45,14 @@ object DBQueryBuilder {
 	 * Convert an Option[String] to a BSONDocument containing the _id field name and the BSONObjectID.
 	 * If the Option[String] is None it sets _id to BSONUndefined
 	 *
-	 * @param objectId
+	 * @param objectId - The BSONObjectID
 	 * @return - a BSONDocument
 	 */
   def id(objectId: Option[String]): BSONDocument = objectId match {
      case None => BSONDocument("_id" -> BSONUndefined)
      case Some(s) => BSONObjectID.parse(s) match {
 		 	case Success(success) => id(success)
-			case Failure(failure) => logger.warn("BSONObjectID could not be parsed!! Defaulting to BSONUndefined!!")
+			case Failure(_) => logger.warn("BSONObjectID could not be parsed!! Defaulting to BSONUndefined!!")
 				BSONDocument("_id" -> BSONUndefined)
 		 }
    }
@@ -109,7 +109,7 @@ object DBQueryBuilder {
 	/**
 	 *
 	 * @param field - The string name of the field to pull
-	 * @param query
+	 * @param query - The T data to be used to pull the field
 	 * @param writer - The BSONDocumentWriter for mashalling the T to a BSONDocument
 	 * @tparam T - The type parameter T
 	 * @return - a BSONDocument

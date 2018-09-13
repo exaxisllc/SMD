@@ -20,8 +20,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Failure, Success}
 import reactivemongo.bson.{BSONDocumentReader, BSONDocumentWriter, BSONObjectID}
-import play.api.mvc.InjectedController
-import play.api.libs.json.{Format, Json}
+import play.api.mvc.{Action, AnyContent, InjectedController}
+import play.api.libs.json.{Format, JsValue, Json}
 import play.api.Logger
 
 
@@ -50,11 +50,11 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param fmt - The Json.format[T] on the companion object for T
    * @return - Action[JsValue]
    */
-  def create()(implicit writer: BSONDocumentWriter[T], fmt:Format[T] ) = Action.async(parse.json) { implicit request =>
+  def create()(implicit writer: BSONDocumentWriter[T], fmt:Format[T] ) : Action[JsValue] = Action.async(parse.json) { implicit request =>
     // process the json body
     request.body.validate[T].map { instance =>
       instance.id match {
-        case Some(s) => Future(invalidJSON)
+        case Some(_) => Future(invalidJSON)
         case  None => dao.insert(instance).map {
           case Failure(t) => BadRequest(t.getLocalizedMessage)
           case Success(uwr) => if (uwr.n == 1) Created(Json.toJson(uwr.upserted.head._id.asInstanceOf[BSONObjectID].stringify)) else BadRequest
@@ -71,12 +71,12 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param fmt - The Json.format[T] on the companion object for T
    * @return - Action[AnyContent]
    */
-  def getById(id:String)(implicit reader: BSONDocumentReader[T], fmt:Format[T]) = Action.async {
+  def getById(id:String)(implicit reader: BSONDocumentReader[T], fmt:Format[T]) : Action[AnyContent] = Action.async {
     dao.findById(Some(id)).map {
       case None => NotFound
       case Some(doc) => Ok(Json.toJson(doc))
     }.recover {
-      case e: Exception => NotFound
+      case _: Exception => NotFound
     }
    }
 
@@ -88,7 +88,7 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param tag - Reflection info for T
    * @return - Action[AnyContent]
    */
-  def getByAlt()(implicit reader: BSONDocumentReader[T], fmt:Format[T], daoData:DaoData[T], tag : TypeTag[T] ) = Action.async { request =>
+  def getByAlt()(implicit reader: BSONDocumentReader[T], fmt:Format[T], daoData:DaoData[T], tag : TypeTag[T] ) : Action[AnyContent] = Action.async { request =>
     val paramMap = request.queryString.map {
           case (k, v) => Logger.debug(k+"->"+v); k -> v.mkString
     }
@@ -107,12 +107,12 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param fmt - The Json.format[T] on the companion object for T
    * @return - Action[JsValue]
    */
-  def update()(implicit writer: BSONDocumentWriter[T], fmt:Format[T]) = Action.async(parse.json) { request =>
+  def update()(implicit writer: BSONDocumentWriter[T], fmt:Format[T]): Action[JsValue]  = Action.async(parse.json) { request =>
       // process the json body
       request.body.validate[T].map { instance =>
         instance.id match {
           case None => Future(invalidJSON)
-          case Some(s) => dao.update(instance).map {
+          case Some(_) => dao.update(instance).map {
             case Failure(t) => BadRequest(t.getLocalizedMessage)
             case Success(uwr) => if (uwr.n == 1) Accepted else NotFound
           }
@@ -126,7 +126,7 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param id - id of the T to be deleted
    * @return - Action[AnyContent] which is a OK or NOT FOUND
    */
-  def delete(id:String) = Action.async {
+  def delete(id:String) : Action[AnyContent] = Action.async {
     dao.remove(Some(id)).map {
       case Failure(t) => BadRequest(t.getLocalizedMessage)
       case Success(count) => if (count > 0) Ok else NotFound
@@ -141,7 +141,7 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param tag - Reflection info for T
    * @return - Action[AnyContent] containingg the count of documents deleted or an error message
    */
-  def deleteList(q: Option[String])(implicit daoData:DaoData[T], tag : TypeTag[T] ) = Action.async { request =>
+  def deleteList(q: Option[String])(implicit daoData:DaoData[T], tag : TypeTag[T] ) : Action[AnyContent] = Action.async { request =>
     val paramMap = request.queryString.map {
       case (k, v) => Logger.debug(k+"->"+v); k -> v.mkString
     } - "q"
@@ -166,7 +166,7 @@ abstract class MongoDaoController[T <: Identifiable] extends InjectedController 
    * @param tag - Reflection info for T
    * @return - Action[AnyContent]
    */
-  def list(p:Int, ipp: Int, q: Option[String], s: Option[String])(implicit reader: BSONDocumentReader[T], fmt: Format[T], pgfmt: Format[Pagination], daoData:DaoData[T], tag : TypeTag[T] ) = Action.async {
+  def list(p:Int, ipp: Int, q: Option[String], s: Option[String])(implicit reader: BSONDocumentReader[T], fmt: Format[T], pgfmt: Format[Pagination], daoData:DaoData[T], tag : TypeTag[T] ) : Action[AnyContent] = Action.async {
     request => // get all the params that are not know params
       val paramMap = request.queryString.map {
         case (k, v) => Logger.debug(k+"->"+v); k -> v.mkString

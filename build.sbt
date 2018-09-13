@@ -3,7 +3,7 @@ import sbt.Keys.{credentials, homepage, pomExtra, publishMavenStyle, publishTo}
 
 lazy val commonSettings = Seq(
   organization := "org.exaxis.smd",
-  version := "1.0.2",
+  version := "1.0.3-SNAPSHOT",
   scalaVersion := "2.12.4",
   homepage := Some(url("https://github.com/exaxisllc/SMD")),
   pomExtra :=

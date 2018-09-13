@@ -16,7 +16,7 @@
 
 package org.exaxis.smd
 
-import reactivemongo.api.commands.{UpdateWriteResult, Upserted}
+import reactivemongo.api.commands.UpdateWriteResult
 import reactivemongo.bson._
 
 import scala.concurrent.Future
