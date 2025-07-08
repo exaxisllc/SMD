@@ -4,7 +4,7 @@ import sbt.Keys.{credentials, homepage, pomExtra, publishMavenStyle, publishTo}
 lazy val commonSettings = Seq(
   organization := "org.exaxis.smd",
   version := "1.0.3-SNAPSHOT",
-  scalaVersion := "2.12.4",
+  scalaVersion := "2.12.20",
   homepage := Some(url("https://github.com/exaxisllc/SMD")),
   pomExtra :=
     <scm>
@@ -30,7 +30,7 @@ lazy val commonSettings = Seq(
     , "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "2.1.1" % Test  // force a newer version
     , "com.github.simplyscala" %% "scalatest-embedmongo" % "0.2.4" %  Test
     , "org.scalatest" %% "scalatest" % "3.0.5" % Test),
-  packagedArtifacts in publish ~= { m =>
+  publish / packagedArtifacts ~= { m =>
     val classifiersToExclude = Set(
       Artifact.SourceClassifier,
       Artifact.DocClassifier
